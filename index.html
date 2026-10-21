@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI 手势贪吃蛇</title>
+
+  <!-- 引入 MediaPipe 核心脚本 -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 100vw; height: 100vh; overflow: hidden;
+      background-color: #080c16; display: flex; justify-content: center; align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none; -webkit-user-select: none;
+    }
+    #game-container {
+      position: relative; width: 100vw; height: 100vh;
+      display: flex; justify-content: center; align-items: center;
+      background: #000; overflow: hidden;
+    }
+    #webcam {
+      position: absolute; top: 0; left: 0; width: 1px; height: 1px;
+      opacity: 0.01; pointer-events: none;
+    }
+    #output_canvas {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .hud-panel {
+      position: absolute; top: 16px; z-index: 20;
+      background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px); border-radius: 12px; color: #fff;
+      padding: 8px 16px; display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+    }
+    #score-hud { left: 16px; }
+    .score-main { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    #score-val { color: #22c55e; font-size: 24px; font-weight: 800; }
+    .highscore-sub { font-size: 12px; color: #fbbf24; }
+    #color-hud { right: 16px; display: flex; flex-direction: row; align-items: center; gap: 8px; }
+    .color-dot { width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+    .color-text { font-size: 14px; font-weight: 600; }
+
+    .ctrl-group {
+      position: absolute; bottom: 16px; left: 16px; z-index: 25;
+      display: flex; gap: 8px;
+    }
+    .ctrl-btn {
+      background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px;
+      font-weight: 600; cursor: pointer;
+    }
+
+    /* 启动与权限遮罩 */
+    #start-overlay {
+      position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95);
+      z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 24px; text-align: center; gap: 16px; color: #fff;
+    }
+    .start-btn {
+      background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+      color: #fff; border: none; font-size: 18px; font-weight: 700;
+      padding: 14px 36px; border-radius: 14px; cursor: pointer;
+      box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+      transition: transform 0.1s;
+    }
+    .start-btn:active { transform: scale(0.96); }
+
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #gameover-screen {
+      position: absolute; inset: 0; background: rgba(0, 0, 0, 0.85);
+      z-index: 60; display: none; flex-direction: column; justify-content: center; align-items: center;
+    }
+    .go-card {
+      background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 20px; padding: 32px 40px; display: flex; flex-direction: column;
+      align-items: center; gap: 14px; color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <video id="webcam" playsinline webkit-playsinline muted autoplay></video>
+    <canvas id="output_canvas"></canvas>
+
+    <div id="score-hud" class="hud-panel">
+      <div class="score-main">🍎 分数: <span id="score-val">0</span></div>
+      <div class="highscore-sub">★ 历史最高: <span id="highscore-val">0</span></div>
+    </div>
+
+    <div id="color-hud" class="hud-panel">
+      <div id="color-dot" class="color-dot" style="background:#22c55e; color:#22c55e;"></div>
+      <div id="color-text" class="color-text" style="color:#22c55e;">翠绿</div>
+    </div>
+
+    <div class="ctrl-group">
+      <button class="ctrl-btn" onclick="restartGame()">🔄 重置</button>
+      <button id="toggle-mode-btn" class="ctrl-btn" onclick="toggleMode()">模式: 手势控制</button>
+    </div>
+
+    <!-- 交互授权界面：必须点击触发浏览器授权 -->
+    <div id="start-overlay">
+      <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
+      <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
+        游戏需要使用摄像头识别食指位置来控制蛇的移动。<br>点击下方按钮后，请在浏览器弹窗中点击<b>“允许”</b>。
+      </p>
+      <div class="spinner" id="loading-spinner"></div>
+      <button id="start-btn" class="start-btn" onclick="startCameraGame()">📸 启动摄像头开始游戏</button>
+      <button class="ctrl-btn" style="margin-top: 10px; opacity: 0.8;" onclick="useMouseMode()">不使用摄像头，鼠标/触屏游玩</button>
+    </div>
+
+    <div id="gameover-screen">
+      <div class="go-card">
+        <h2 style="color: #ef4444; font-size: 28px;">游戏结束</h2>
+        <p style="color: #94a3b8; font-size: 14px;">蛇头碰到了自身！</p>
+        <div style="font-size: 16px; margin: 4px 0;">
+          得分: <b id="final-score" style="color: #4ade80;">0</b> | 
+          最高: <b id="final-highscore" style="color: #fbbf24;">0</b>
+        </div>
+        <button class="start-btn" onclick="restartGame()">再玩一次</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const RAINBOW = [
+      { name: '赤红', hex: '#ef4444', r: 239, g: 68, b: 68 },
+      { name: '耀橙', hex: '#f97316', r: 249, g: 115, b: 22 },
+      { name: '明黄', hex: '#eab308', r: 234, g: 179, b: 8 },
+      { name: '翠绿', hex: '#22c55e', r: 34, g: 197, b: 94 },
+      { name: '青碧', hex: '#06b6d4', r: 6, g: 182, b: 212 },
+      { name: '湛蓝', hex: '#3b82f6', r: 59, g: 130, b: 246 },
+      { name: '幻紫', hex: '#a855f7', r: 168, g: 85, b: 247 }
+    ];
+
+    const canvas = document.getElementById('output_canvas');
+    const ctx = canvas.

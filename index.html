@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AI 手势贪吃蛇</title>
 
-  <!-- 换用国内高速可用的 CDN 镜像 -->
+  <!-- 全面切换至无墙国内极速镜像源 -->
   <script src="https://registry.npmmirror.com/@mediapipe/camera_utils/0.4.1675466862/files/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://registry.npmmirror.com/@mediapipe/hands/0.4.1675469240/files/hands.js" crossorigin="anonymous"></script>
 
@@ -99,10 +99,10 @@
     <div id="start-overlay">
       <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
       <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
-        游戏需要使用摄像头识别食指位置来控制蛇的移动。<br>点击下方按钮后，请在浏览器弹窗中点击<b>“允许”</b>。
+        游戏需要使用前置摄像头识别手指。<br>点击下方按钮后，请在弹窗中允许权限。
       </p>
       <button id="real-start-btn" class="start-btn">📸 启动摄像头开始游戏</button>
-      <button id="mouse-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.8;">不使用摄像头，鼠标/触屏游玩</button>
+      <button id="mouse-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.8;">不使用摄像头，触屏/鼠标游玩</button>
     </div>
 
     <div id="gameover-screen">
@@ -198,18 +198,21 @@
 
     toggleBtn.onclick = function() {
       isMouseMode = !isMouseMode;
-      toggleBtn.innerText = isMouseMode ? '模式: 鼠标/触屏' : '模式: 手势控制';
+      toggleBtn.innerText = isMouseMode ? '模式: 触屏/鼠标' : '模式: 手势控制';
     };
 
     document.getElementById('mouse-mode-btn').onclick = function() {
       isMouseMode = true;
-      toggleBtn.innerText = '模式: 鼠标/触屏';
+      toggleBtn.innerText = '模式: 触屏/鼠标';
       startOverlay.style.display = 'none';
     };
 
     window.addEventListener('mousemove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
     window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0) { pointer.x = e.touches[0].clientX; pointer.y = e.touches[0].clientY; }
+      if (e.touches.length > 0) { 
+        pointer.x = e.touches[0].clientX; 
+        pointer.y = e.touches[0].clientY; 
+      }
     }, { passive: true });
 
     function updatePhysics(targetX, targetY) {
@@ -282,6 +285,21 @@
 
       if (target) updatePhysics(target.x, target.y);
 
+      // 食指追踪准星视觉提示（确认当前是否捕获到手指）
+      if (fingerTarget && !isMouseMode) {
+        ctx.save();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(fingerTarget.x, fingerTarget.y, 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(fingerTarget.x, fingerTarget.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       if (!isGameOver) {
         apple.pulse += 0.08;
         const pr = apple.r + Math.sin(apple.pulse) * 3;
@@ -325,35 +343,41 @@
     requestAnimationFrame(loop);
 
     startBtn.addEventListener('click', async function() {
-      tipText.innerHTML = '⚡ 正在请求摄像头权限，请点击浏览器上方<b>“允许”</b>！';
+      tipText.innerHTML = '⚡ 正在请求相机权限...';
       startBtn.innerText = '正在调起摄像头...';
 
       try {
+        // 手机端限制采集分辨率为 480p/640p，避免手机发热降频和算力崩溃
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { 
+            facingMode: 'user', 
+            width: { ideal: 640 }, 
+            height: { ideal: 480 } 
+          },
           audio: false
         });
         video.srcObject = stream;
         await video.play();
 
-        tipText.innerHTML = '✅ 摄像头已就绪，正在启动手部追踪...';
+        tipText.innerHTML = '✅ 相机已连接，正在载入 AI 追踪模型(约2-3秒)...';
 
         if (typeof Hands !== 'undefined') {
           hands = new Hands({
+            // 关键：强制让 wasm、tflite 等底层权重全部走国内 npmmirror 镜像源
             locateFile: (file) => `https://registry.npmmirror.com/@mediapipe/hands/0.4.1675469240/files/${file}`
           });
 
           hands.setOptions({
             maxNumHands: 1,
-            modelComplexity: 0,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
+            modelComplexity: 0, // 移动端选用极速轻量模型
+            minDetectionConfidence: 0.35, // 适当放宽识别阈值，提升移动端弱光/小手识别率
+            minTrackingConfidence: 0.35
           });
 
           hands.onResults((res) => {
             startOverlay.style.display = 'none';
             if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
-              const p = res.multiHandLandmarks[0][8];
+              const p = res.multiHandLandmarks[0][8]; // 食指指尖坐标
               fingerTarget = { x: (1 - p.x) * canvas.width, y: p.y * canvas.height };
             } else {
               fingerTarget = null;
@@ -364,7 +388,9 @@
           async function detect() {
             if (!isMouseMode && video.readyState >= 2 && !isProcessing) {
               isProcessing = true;
-              try { await hands.send({ image: video }); } catch (e) {}
+              try { 
+                await hands.send({ image: video }); 
+              } catch (e) {}
               isProcessing = false;
             }
             requestAnimationFrame(detect);
@@ -375,7 +401,7 @@
         }
 
       } catch (err) {
-        alert('无法调用摄像头：' + err.name + ' - ' + err.message + '\n请在浏览器网址栏左侧检查摄像头权限是否被设为禁止！');
+        alert('无法启动相机：' + err.name + ' - ' + err.message + '\n请检查手机系统设置或浏览器设置中的相机权限！');
         tipText.innerHTML = `<span style="color:#ef4444;">错误: ${err.message}</span>`;
         startBtn.innerText = '📸 启动摄像头开始游戏';
       }

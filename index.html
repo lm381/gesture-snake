@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AI 手势贪吃蛇</title>
 
-  <!-- 引入 MediaPipe 核心脚本 -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <!-- 换用国内高速可用的 CDN 镜像 -->
+  <script src="https://registry.npmmirror.com/@mediapipe/camera_utils/0.4.1675466862/files/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://registry.npmmirror.com/@mediapipe/hands/0.4.1675469240/files/hands.js" crossorigin="anonymous"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,27 +53,17 @@
       font-weight: 600; cursor: pointer;
     }
 
-    /* 启动与权限遮罩 */
     #start-overlay {
       position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95);
       z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center;
       padding: 24px; text-align: center; gap: 16px; color: #fff;
     }
     .start-btn {
-      background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-      color: #fff; border: none; font-size: 18px; font-weight: 700;
+      background: #22c55e; color: #fff; border: none; font-size: 18px; font-weight: 700;
       padding: 14px 36px; border-radius: 14px; cursor: pointer;
       box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
-      transition: transform 0.1s;
     }
-    .start-btn:active { transform: scale(0.96); }
-
-    .spinner {
-      width: 40px; height: 40px; border: 4px solid rgba(255, 255, 255, 0.2);
-      border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite;
-      display: none;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .start-btn:active { transform: scale(0.97); }
 
     #gameover-screen {
       position: absolute; inset: 0; background: rgba(0, 0, 0, 0.85);
@@ -102,19 +92,17 @@
     </div>
 
     <div class="ctrl-group">
-      <button class="ctrl-btn" onclick="restartGame()">🔄 重置</button>
-      <button id="toggle-mode-btn" class="ctrl-btn" onclick="toggleMode()">模式: 手势控制</button>
+      <button class="ctrl-btn" id="btn-restart">🔄 重置</button>
+      <button id="toggle-mode-btn" class="ctrl-btn">模式: 手势控制</button>
     </div>
 
-    <!-- 交互授权界面：必须点击触发浏览器授权 -->
     <div id="start-overlay">
       <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
       <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
         游戏需要使用摄像头识别食指位置来控制蛇的移动。<br>点击下方按钮后，请在浏览器弹窗中点击<b>“允许”</b>。
       </p>
-      <div class="spinner" id="loading-spinner"></div>
-      <button id="start-btn" class="start-btn" onclick="startCameraGame()">📸 启动摄像头开始游戏</button>
-      <button class="ctrl-btn" style="margin-top: 10px; opacity: 0.8;" onclick="useMouseMode()">不使用摄像头，鼠标/触屏游玩</button>
+      <button id="real-start-btn" class="start-btn">📸 启动摄像头开始游戏</button>
+      <button id="mouse-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.8;">不使用摄像头，鼠标/触屏游玩</button>
     </div>
 
     <div id="gameover-screen">
@@ -125,7 +113,7 @@
           得分: <b id="final-score" style="color: #4ade80;">0</b> | 
           最高: <b id="final-highscore" style="color: #fbbf24;">0</b>
         </div>
-        <button class="start-btn" onclick="restartGame()">再玩一次</button>
+        <button class="start-btn" id="btn-re-play">再玩一次</button>
       </div>
     </div>
   </div>
@@ -142,4 +130,256 @@
     ];
 
     const canvas = document.getElementById('output_canvas');
-    const ctx = canvas.
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('webcam');
+    const startOverlay = document.getElementById('start-overlay');
+    const startBtn = document.getElementById('real-start-btn');
+    const tipText = document.getElementById('tip-text');
+    const toggleBtn = document.getElementById('toggle-mode-btn');
+
+    let score = 0;
+    let highscore = parseInt(localStorage.getItem('gesture_snake_highscore') || '0', 10);
+    document.getElementById('highscore-val').innerText = highscore;
+
+    let isGameOver = false;
+    let isMouseMode = false;
+    let pointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    let fingerTarget = null;
+    let hands = null;
+
+    const SEG_DIST = 12;
+    let snake = [];
+    let length = 25;
+    let colorIdx = 3;
+    let curCol = { ...RAINBOW[colorIdx] };
+    let tarCol = { ...RAINBOW[colorIdx] };
+    let apple = { x: 0, y: 0, r: 16, pulse: 0 };
+    let safeFrames = 60;
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      if (!apple.x && !apple.y) spawnApple();
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function spawnApple() {
+      const pad = 60;
+      apple.x = pad + Math.random() * (canvas.width - pad * 2);
+      apple.y = pad + Math.random() * (canvas.height - pad * 2);
+    }
+
+    function triggerGameOver() {
+      if (isGameOver) return;
+      isGameOver = true;
+      if (score > highscore) {
+        highscore = score;
+        localStorage.setItem('gesture_snake_highscore', highscore);
+        document.getElementById('highscore-val').innerText = highscore;
+      }
+      document.getElementById('final-score').innerText = score;
+      document.getElementById('final-highscore').innerText = highscore;
+      document.getElementById('gameover-screen').style.display = 'flex';
+    }
+
+    function restartGame() {
+      score = 0;
+      document.getElementById('score-val').innerText = 0;
+      length = 25;
+      snake = [];
+      isGameOver = false;
+      safeFrames = 60;
+      document.getElementById('gameover-screen').style.display = 'none';
+      spawnApple();
+    }
+    document.getElementById('btn-restart').onclick = restartGame;
+    document.getElementById('btn-re-play').onclick = restartGame;
+
+    toggleBtn.onclick = function() {
+      isMouseMode = !isMouseMode;
+      toggleBtn.innerText = isMouseMode ? '模式: 鼠标/触屏' : '模式: 手势控制';
+    };
+
+    document.getElementById('mouse-mode-btn').onclick = function() {
+      isMouseMode = true;
+      toggleBtn.innerText = '模式: 鼠标/触屏';
+      startOverlay.style.display = 'none';
+    };
+
+    window.addEventListener('mousemove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) { pointer.x = e.touches[0].clientX; pointer.y = e.touches[0].clientY; }
+    }, { passive: true });
+
+    function updatePhysics(targetX, targetY) {
+      if (isGameOver) return;
+      if (snake.length === 0) {
+        for (let i = 0; i < length; i++) snake.push({ x: targetX, y: targetY });
+        return;
+      }
+
+      snake[0].x += (targetX - snake[0].x) * 0.45;
+      snake[0].y += (targetY - snake[0].y) * 0.45;
+
+      for (let i = 1; i < snake.length; i++) {
+        const p = snake[i - 1], c = snake[i];
+        const dx = p.x - c.x, dy = p.y - c.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0.001) {
+          c.x += dx * ((dist - SEG_DIST) / dist);
+          c.y += dy * ((dist - SEG_DIST) / dist);
+        }
+      }
+
+      while (snake.length < length) {
+        const tail = snake[snake.length - 1];
+        snake.push({ x: tail.x, y: tail.y });
+      }
+
+      if (safeFrames > 0) {
+        safeFrames--;
+      } else if (snake.length > 25) {
+        for (let i = 16; i < snake.length; i++) {
+          if (Math.hypot(snake[0].x - snake[i].x, snake[0].y - snake[i].y) < 13) {
+            triggerGameOver();
+            return;
+          }
+        }
+      }
+
+      if (Math.hypot(targetX - apple.x, targetY - apple.y) < apple.r + 20) {
+        score++;
+        document.getElementById('score-val').innerText = score;
+        length += 5;
+        colorIdx = (colorIdx + 1) % RAINBOW.length;
+        tarCol = { ...RAINBOW[colorIdx] };
+        document.getElementById('color-dot').style.background = RAINBOW[colorIdx].hex;
+        document.getElementById('color-dot').style.color = RAINBOW[colorIdx].hex;
+        document.getElementById('color-text').innerText = RAINBOW[colorIdx].name;
+        document.getElementById('color-text').style.color = RAINBOW[colorIdx].hex;
+        spawnApple();
+      }
+    }
+
+    function render(camImg, target) {
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      if (camImg && !isMouseMode) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(camImg, -w, 0, w, h);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      curCol.r += (tarCol.r - curCol.r) * 0.08;
+      curCol.g += (tarCol.g - curCol.g) * 0.08;
+      curCol.b += (tarCol.b - curCol.b) * 0.08;
+
+      if (target) updatePhysics(target.x, target.y);
+
+      if (!isGameOver) {
+        apple.pulse += 0.08;
+        const pr = apple.r + Math.sin(apple.pulse) * 3;
+        ctx.save();
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ef4444';
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(apple.x, apple.y, pr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if (snake.length > 1) {
+        const r = Math.round(curCol.r), g = Math.round(curCol.g), b = Math.round(curCol.b);
+        for (let i = snake.length - 1; i >= 0; i--) {
+          const s = snake[i];
+          const t = i / snake.length;
+          const rad = 16 * (1 - t * 0.5);
+          ctx.save();
+          ctx.fillStyle = `rgb(${Math.min(255, Math.round(r * (1 - t * 0.25)))}, ${Math.min(255, Math.round(g * (1 - t * 0.25)))}, ${Math.min(255, Math.round(b * (1 - t * 0.25)))})`;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(snake[0].x - 4, snake[0].y - 4, 3.5, 0, Math.PI * 2);
+        ctx.arc(snake[0].x + 4, snake[0].y - 4, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function loop() {
+      const activeTarget = isMouseMode ? pointer : (fingerTarget || pointer);
+      render(video.readyState >= 2 ? video : null, activeTarget);
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    startBtn.addEventListener('click', async function() {
+      tipText.innerHTML = '⚡ 正在请求摄像头权限，请点击浏览器上方<b>“允许”</b>！';
+      startBtn.innerText = '正在调起摄像头...';
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+
+        tipText.innerHTML = '✅ 摄像头已就绪，正在启动手部追踪...';
+
+        if (typeof Hands !== 'undefined') {
+          hands = new Hands({
+            locateFile: (file) => `https://registry.npmmirror.com/@mediapipe/hands/0.4.1675469240/files/${file}`
+          });
+
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 0,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+
+          hands.onResults((res) => {
+            startOverlay.style.display = 'none';
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+              const p = res.multiHandLandmarks[0][8];
+              fingerTarget = { x: (1 - p.x) * canvas.width, y: p.y * canvas.height };
+            } else {
+              fingerTarget = null;
+            }
+          });
+
+          let isProcessing = false;
+          async function detect() {
+            if (!isMouseMode && video.readyState >= 2 && !isProcessing) {
+              isProcessing = true;
+              try { await hands.send({ image: video }); } catch (e) {}
+              isProcessing = false;
+            }
+            requestAnimationFrame(detect);
+          }
+          requestAnimationFrame(detect);
+        } else {
+          startOverlay.style.display = 'none';
+        }
+
+      } catch (err) {
+        alert('无法调用摄像头：' + err.name + ' - ' + err.message + '\n请在浏览器网址栏左侧检查摄像头权限是否被设为禁止！');
+        tipText.innerHTML = `<span style="color:#ef4444;">错误: ${err.message}</span>`;
+        startBtn.innerText = '📸 启动摄像头开始游戏';
+      }
+    });
+  </script>
+</body>
+</html>

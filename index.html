@@ -5,10 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AI 手势贪吃蛇</title>
 
-  <!-- 引入官方稳定脚本库 -->
-  <script src="https://registry.npmmirror.com/@mediapipe/camera_utils/0.4.1675466862/files/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://registry.npmmirror.com/@mediapipe/hands/0.4.1675469240/files/hands.js" crossorigin="anonymous"></script>
-
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -20,13 +16,14 @@
     #game-container {
       position: relative; width: 100vw; height: 100vh;
       display: flex; justify-content: center; align-items: center;
-      background: #000; overflow: hidden;
+      background: #080c16; overflow: hidden;
     }
     #webcam {
       position: absolute; top: 0; left: 0; width: 1px; height: 1px;
       opacity: 0.01; pointer-events: none;
     }
     #output_canvas {
+      position: absolute; top: 0; left: 0;
       width: 100%; height: 100%; object-fit: cover;
     }
 
@@ -59,7 +56,7 @@
     }
 
     #start-overlay {
-      position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95);
+      position: absolute; inset: 0; background: rgba(15, 23, 42, 0.92);
       z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center;
       padding: 24px; text-align: center; gap: 16px; color: #fff;
     }
@@ -67,6 +64,7 @@
       background: #22c55e; color: #fff; border: none; font-size: 18px; font-weight: 700;
       padding: 14px 36px; border-radius: 14px; cursor: pointer;
       box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+      -webkit-tap-highlight-color: transparent;
     }
     .start-btn:active { transform: scale(0.97); }
 
@@ -91,7 +89,6 @@
       <div class="highscore-sub">★ 历史最高: <span id="highscore-val">0</span></div>
     </div>
 
-    <!-- 顶部状态提示：实时反馈 AI 识别状态 -->
     <div id="status-hud">待启动</div>
 
     <div class="ctrl-group">
@@ -99,13 +96,14 @@
       <button id="toggle-mode-btn" class="ctrl-btn">切换: 触屏模式</button>
     </div>
 
+    <!-- 交互授权层 -->
     <div id="start-overlay">
       <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
       <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
-        游戏需要使用前置摄像头追踪食指位置。<br>点击下方按钮后，请在弹出的系统提示中点击<b>“允许”</b>。
+        游戏支持<b>前置摄像头手势</b>与<b>屏幕触屏滑动</b>。<br>点击下方绿色按钮即可开始！
       </p>
       <button id="real-start-btn" class="start-btn">📸 启动摄像头开始游戏</button>
-      <button id="touch-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.85;">直接用手指触屏/滑动游玩</button>
+      <button id="touch-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.9;">直接触屏/滑动游玩</button>
     </div>
 
     <div id="gameover-screen">
@@ -122,6 +120,7 @@
   </div>
 
   <script>
+    // ---------------- 游戏主体引擎（完全独立，任何报错都绝不影响画面） ----------------
     const canvas = document.getElementById('output_canvas');
     const ctx = canvas.getContext('2d');
     const video = document.getElementById('webcam');
@@ -146,17 +145,6 @@
     let apple = { x: 0, y: 0, r: 16, pulse: 0 };
     let safeFrames = 60;
 
-    // 核心初始化：一开始就在屏幕中心把蛇生成出来，绝不留白
-    function initSnake() {
-      snake = [];
-      const startX = window.innerWidth / 2;
-      const startY = window.innerHeight / 2;
-      targetPos = { x: startX, y: startY };
-      for (let i = 0; i < length; i++) {
-        snake.push({ x: startX, y: startY + i * 2 });
-      }
-    }
-
     function resize() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -164,6 +152,17 @@
     }
     window.addEventListener('resize', resize);
     resize();
+
+    // 初始化贪吃蛇：立刻在屏幕中央生成一整条蛇
+    function initSnake() {
+      snake = [];
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      targetPos = { x: cx, y: cy };
+      for (let i = 0; i < length; i++) {
+        snake.push({ x: cx, y: cy + i * 2 });
+      }
+    }
     initSnake();
 
     function spawnApple() {
@@ -198,25 +197,25 @@
     document.getElementById('btn-restart').onclick = restartGame;
     document.getElementById('btn-re-play').onclick = restartGame;
 
-    // 触屏滑动控制
-    function handlePointer(clientX, clientY) {
+    // 手指滑动/触屏事件绑定
+    function updateTouch(clientX, clientY) {
       targetPos.x = clientX;
       targetPos.y = clientY;
     }
     window.addEventListener('mousemove', (e) => {
-      if (isTouchMode || !video.srcObject) handlePointer(e.clientX, e.clientY);
+      if (isTouchMode || !video.srcObject) updateTouch(e.clientX, e.clientY);
     });
     window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0) handlePointer(e.touches[0].clientX, e.touches[0].clientY);
+      if (e.touches.length > 0) updateTouch(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
     window.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 0) handlePointer(e.touches[0].clientX, e.touches[0].clientY);
+      if (e.touches.length > 0) updateTouch(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
 
     document.getElementById('touch-mode-btn').onclick = function() {
       isTouchMode = true;
       startOverlay.style.display = 'none';
-      statusHud.innerText = '当前为屏幕触控模式';
+      statusHud.innerText = '👆 触屏模式：直接滑动屏幕控制蛇';
       statusHud.style.color = '#4ade80';
       toggleBtn.innerText = '模式: 触屏操控';
     };
@@ -224,14 +223,13 @@
     toggleBtn.onclick = function() {
       isTouchMode = !isTouchMode;
       toggleBtn.innerText = isTouchMode ? '模式: 触屏操控' : '模式: 手势控制';
-      statusHud.innerText = isTouchMode ? '触屏模式（滑动屏幕）' : (hasDetectedHand ? '🎯 正在追踪食指' : '🔍 寻找手掌中...');
+      statusHud.innerText = isTouchMode ? '👆 触屏模式：直接滑动屏幕' : (hasDetectedHand ? '🎯 正在追踪食指' : '🔍 寻找手掌中...');
     };
 
-    // 物理移动更新
+    // 蛇的移动与碰撞检测
     function updatePhysics() {
       if (isGameOver || snake.length === 0) return;
 
-      // 蛇头向目标平滑移动
       snake[0].x += (targetPos.x - snake[0].x) * 0.35;
       snake[0].y += (targetPos.y - snake[0].y) * 0.35;
 
@@ -261,7 +259,6 @@
         }
       }
 
-      // 吃到苹果
       if (Math.hypot(snake[0].x - apple.x, snake[0].y - apple.y) < apple.r + 20) {
         score++;
         document.getElementById('score-val').innerText = score;
@@ -270,12 +267,11 @@
       }
     }
 
-    // 游戏主渲染循环
+    // 独立循环渲染（永远运行，确保蛇在屏幕上清晰可见）
     function render() {
       const w = canvas.width, h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
-      // 绘制背景（有摄像头则画前置镜像，否则纯深色背景）
       if (video.readyState >= 2 && !isTouchMode) {
         ctx.save();
         ctx.scale(-1, 1);
@@ -302,9 +298,132 @@
         ctx.restore();
       }
 
-      // 绘制贪吃蛇
+      // 绘制蛇
       if (snake.length > 1) {
         for (let i = snake.length - 1; i >= 0; i--) {
           const s = snake[i];
           const t = i / snake.length;
-          const rad = 16 * (1 - t * 0
+          const rad = 16 * (1 - t * 0.45);
+          ctx.save();
+          ctx.fillStyle = `rgb(${Math.round(34 + t * 40)}, ${Math.round(197 - t * 50)}, ${Math.round(94 + t * 40)})`;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(snake[0].x - 5, snake[0].y - 5, 4, 0, Math.PI * 2);
+        ctx.arc(snake[0].x + 5, snake[0].y - 5, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(snake[0].x - 5, snake[0].y - 5, 2, 0, Math.PI * 2);
+        ctx.arc(snake[0].x + 5, snake[0].y - 5, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 手指准星圈
+      if (hasDetectedHand && !isTouchMode) {
+        ctx.save();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(targetPos.x, targetPos.y, 22, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+
+    // ---------------- 异步动态注入 MediaPipe 库（杜绝脚本卡死按钮） ----------------
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.crossOrigin = 'anonymous';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    startBtn.onclick = async function() {
+      startBtn.innerText = '正在调起摄像头...';
+      tipText.innerHTML = '⚡ 请在弹出的浏览器提示中点击<b>“允许”</b>！';
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+
+        startOverlay.style.display = 'none';
+        statusHud.innerText = '⏳ 正在加载手势 AI 模块...';
+
+        // 动态加载 MediaPipe，如果网络受阻立刻平滑切换触屏模式
+        try {
+          await loadScript('https://npm.elemecdn.com/@mediapipe/camera_utils@0.4/camera_utils.js');
+          await loadScript('https://npm.elemecdn.com/@mediapipe/hands@0.4/hands.js');
+
+          const hands = new Hands({
+            locateFile: (file) => `https://npm.elemecdn.com/@mediapipe/hands@0.4/${file}`
+          });
+
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 0,
+            minDetectionConfidence: 0.3,
+            minTrackingConfidence: 0.3
+          });
+
+          hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              hasDetectedHand = true;
+              statusHud.innerText = '🎯 正在追踪食指';
+              statusHud.style.color = '#4ade80';
+              const p = results.multiHandLandmarks[0][8];
+              targetPos.x = (1 - p.x) * canvas.width;
+              targetPos.y = p.y * canvas.height;
+            } else {
+              hasDetectedHand = false;
+              statusHud.innerText = '🔍 未检测到手指，请伸出手掌';
+              statusHud.style.color = '#f59e0b';
+            }
+          });
+
+          const camera = new Camera(video, {
+            onFrame: async () => {
+              if (!isTouchMode && video.readyState >= 2) {
+                await hands.send({ image: video });
+              }
+            },
+            width: 640,
+            height: 480
+          });
+          camera.start();
+
+        } catch (scriptErr) {
+          // 如果国内网络彻底无法访问模型资源，直接降级为触控模式，绝不黑屏！
+          console.warn('AI 模型网络连接超时，切换为滑动触控模式');
+          isTouchMode = true;
+          statusHud.innerText = '已启用触控模式（滑动屏幕控制）';
+          statusHud.style.color = '#4ade80';
+          toggleBtn.innerText = '模式: 触屏操控';
+        }
+
+      } catch (err) {
+        alert('无法启动相机：' + err.message + '\n请检查手机系统设置中是否允许浏览器使用摄像头！');
+        startOverlay.style.display = 'none';
+        isTouchMode = true;
+        statusHud.innerText = '已切换为触控游玩模式';
+      }
+    };
+  </script>
+</body>
+</html>

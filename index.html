@@ -41,8 +41,8 @@
     #status-hud {
       position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
       z-index: 20; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 20px; padding: 6px 16px; color: #38bdf8; font-size: 13px; font-weight: 600;
-      pointer-events: none; white-space: nowrap;
+      border-radius: 20px; padding: 6px 18px; color: #38bdf8; font-size: 13px; font-weight: 600;
+      pointer-events: none; white-space: nowrap; transition: color 0.2s;
     }
 
     .ctrl-group {
@@ -93,17 +93,16 @@
 
     <div class="ctrl-group">
       <button class="ctrl-btn" id="btn-restart">🔄 重置</button>
-      <button id="toggle-mode-btn" class="ctrl-btn">切换: 触屏模式</button>
+      <button id="toggle-mode-btn" class="ctrl-btn">切换: 鼠标/触屏</button>
     </div>
 
-    <!-- 交互授权层 -->
     <div id="start-overlay">
       <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
       <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
-        游戏支持<b>前置摄像头手势</b>与<b>屏幕触屏滑动</b>。<br>点击下方绿色按钮即可开始！
+        点击启动摄像头后，将手掌平举在镜头前 0.5 米左右。<br>可使用<b>伸直食指</b>或<b>整只手掌</b>引导贪吃蛇！
       </p>
       <button id="real-start-btn" class="start-btn">📸 启动摄像头开始游戏</button>
-      <button id="touch-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.9;">直接触屏/滑动游玩</button>
+      <button id="touch-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.9;">直接用鼠标/触屏游玩</button>
     </div>
 
     <div id="gameover-screen">
@@ -120,7 +119,6 @@
   </div>
 
   <script>
-    // ---------------- 游戏主体引擎（完全独立，任何报错都绝不影响画面） ----------------
     const canvas = document.getElementById('output_canvas');
     const ctx = canvas.getContext('2d');
     const video = document.getElementById('webcam');
@@ -137,7 +135,7 @@
     let isGameOver = false;
     let isTouchMode = false;
     let targetPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    let hasDetectedHand = false;
+    let handPoints = null; // 存储手部骨骼点以供屏幕调试
 
     const SEG_DIST = 14;
     let snake = [];
@@ -153,7 +151,6 @@
     window.addEventListener('resize', resize);
     resize();
 
-    // 初始化贪吃蛇：立刻在屏幕中央生成一整条蛇
     function initSnake() {
       snake = [];
       const cx = canvas.width / 2;
@@ -197,7 +194,6 @@
     document.getElementById('btn-restart').onclick = restartGame;
     document.getElementById('btn-re-play').onclick = restartGame;
 
-    // 手指滑动/触屏事件绑定
     function updateTouch(clientX, clientY) {
       targetPos.x = clientX;
       targetPos.y = clientY;
@@ -215,18 +211,17 @@
     document.getElementById('touch-mode-btn').onclick = function() {
       isTouchMode = true;
       startOverlay.style.display = 'none';
-      statusHud.innerText = '👆 触屏模式：直接滑动屏幕控制蛇';
+      statusHud.innerText = '👆 鼠标/触屏模式';
       statusHud.style.color = '#4ade80';
-      toggleBtn.innerText = '模式: 触屏操控';
+      toggleBtn.innerText = '模式: 鼠标操控';
     };
 
     toggleBtn.onclick = function() {
       isTouchMode = !isTouchMode;
-      toggleBtn.innerText = isTouchMode ? '模式: 触屏操控' : '模式: 手势控制';
-      statusHud.innerText = isTouchMode ? '👆 触屏模式：直接滑动屏幕' : (hasDetectedHand ? '🎯 正在追踪食指' : '🔍 寻找手掌中...');
+      toggleBtn.innerText = isTouchMode ? '模式: 鼠标操控' : '模式: 手势控制';
+      statusHud.innerText = isTouchMode ? '👆 鼠标/触屏模式' : '🔍 寻找手掌中...';
     };
 
-    // 蛇的移动与碰撞检测
     function updatePhysics() {
       if (isGameOver || snake.length === 0) return;
 
@@ -267,7 +262,6 @@
       }
     }
 
-    // 独立循环渲染（永远运行，确保蛇在屏幕上清晰可见）
     function render() {
       const w = canvas.width, h = canvas.height;
       ctx.clearRect(0, 0, w, h);
@@ -284,7 +278,25 @@
 
       updatePhysics();
 
-      // 绘制苹果
+      // 调试显示：只要抓到手，就在指节上画点，清晰直观
+      if (handPoints && !isTouchMode) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.7)';
+        for (let pt of handPoints) {
+          ctx.beginPath();
+          ctx.arc((1 - pt.x) * w, pt.y * h, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // 目标指尖准星大圈
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(targetPos.x, targetPos.y, 20, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 苹果
       if (!isGameOver) {
         apple.pulse += 0.08;
         const pr = apple.r + Math.sin(apple.pulse) * 3;
@@ -298,7 +310,7 @@
         ctx.restore();
       }
 
-      // 绘制蛇
+      // 贪吃蛇
       if (snake.length > 1) {
         for (let i = snake.length - 1; i >= 0; i--) {
           const s = snake[i];
@@ -324,22 +336,10 @@
         ctx.fill();
       }
 
-      // 手指准星圈
-      if (hasDetectedHand && !isTouchMode) {
-        ctx.save();
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(targetPos.x, targetPos.y, 22, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-
       requestAnimationFrame(render);
     }
     requestAnimationFrame(render);
 
-    // ---------------- 异步动态注入 MediaPipe 库（杜绝脚本卡死按钮） ----------------
     function loadScript(url) {
       return new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -353,7 +353,7 @@
 
     startBtn.onclick = async function() {
       startBtn.innerText = '正在调起摄像头...';
-      tipText.innerHTML = '⚡ 请在弹出的浏览器提示中点击<b>“允许”</b>！';
+      tipText.innerHTML = '⚡ 请点击浏览器弹窗中的<b>“允许”</b>！';
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -364,9 +364,8 @@
         await video.play();
 
         startOverlay.style.display = 'none';
-        statusHud.innerText = '⏳ 正在加载手势 AI 模块...';
+        statusHud.innerText = '⏳ 正在加载手势模型...';
 
-        // 动态加载 MediaPipe，如果网络受阻立刻平滑切换触屏模式
         try {
           await loadScript('https://npm.elemecdn.com/@mediapipe/camera_utils@0.4/camera_utils.js');
           await loadScript('https://npm.elemecdn.com/@mediapipe/hands@0.4/hands.js');
@@ -375,24 +374,29 @@
             locateFile: (file) => `https://npm.elemecdn.com/@mediapipe/hands@0.4/${file}`
           });
 
+          // 核心优化：调低阈值到 0.2，并启用最敏锐的模型复杂度
           hands.setOptions({
             maxNumHands: 1,
-            modelComplexity: 0,
-            minDetectionConfidence: 0.3,
-            minTrackingConfidence: 0.3
+            modelComplexity: 1, // 0 对稍微偏角的手识别差，1 在电脑上识别率高得多
+            minDetectionConfidence: 0.25,
+            minTrackingConfidence: 0.25
           });
 
           hands.onResults((results) => {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-              hasDetectedHand = true;
-              statusHud.innerText = '🎯 正在追踪食指';
+              const lm = results.multiHandLandmarks[0];
+              handPoints = lm;
+
+              // 智能定位：优先选食指指尖(8)；如果手指蜷缩，则自动用中指尖(12)或手掌心(9)
+              const finger = lm[8] || lm[12] || lm[9];
+              targetPos.x = (1 - finger.x) * canvas.width;
+              targetPos.y = finger.y * canvas.height;
+
+              statusHud.innerText = '🎯 识别成功！正在手势操控';
               statusHud.style.color = '#4ade80';
-              const p = results.multiHandLandmarks[0][8];
-              targetPos.x = (1 - p.x) * canvas.width;
-              targetPos.y = p.y * canvas.height;
             } else {
-              hasDetectedHand = false;
-              statusHud.innerText = '🔍 未检测到手指，请伸出手掌';
+              handPoints = null;
+              statusHud.innerText = '🔍 寻找手掌中（手掌正对镜头，距离40-60cm）';
               statusHud.style.color = '#f59e0b';
             }
           });
@@ -409,19 +413,17 @@
           camera.start();
 
         } catch (scriptErr) {
-          // 如果国内网络彻底无法访问模型资源，直接降级为触控模式，绝不黑屏！
-          console.warn('AI 模型网络连接超时，切换为滑动触控模式');
+          console.warn('模型加载失败，切换触控模式', scriptErr);
           isTouchMode = true;
-          statusHud.innerText = '已启用触控模式（滑动屏幕控制）';
+          statusHud.innerText = '触屏/鼠标模式（滑动移动）';
           statusHud.style.color = '#4ade80';
-          toggleBtn.innerText = '模式: 触屏操控';
         }
 
       } catch (err) {
-        alert('无法启动相机：' + err.message + '\n请检查手机系统设置中是否允许浏览器使用摄像头！');
+        alert('无法启动相机：' + err.message);
         startOverlay.style.display = 'none';
         isTouchMode = true;
-        statusHud.innerText = '已切换为触控游玩模式';
+        statusHud.innerText = '触屏/鼠标模式';
       }
     };
   </script>

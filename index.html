@@ -5,77 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AI 手势贪吃蛇</title>
 
+  <!-- 使用稳定 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       width: 100vw; height: 100vh; overflow: hidden;
-      background-color: #080c16; display: flex; justify-content: center; align-items: center;
+      background: #080c16; display: flex; justify-content: center; align-items: center;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       user-select: none; -webkit-user-select: none;
     }
-    #game-container {
-      position: relative; width: 100vw; height: 100vh;
-      display: flex; justify-content: center; align-items: center;
-      background: #080c16; overflow: hidden;
-    }
-    #webcam {
-      position: absolute; top: 0; left: 0; width: 1px; height: 1px;
-      opacity: 0.01; pointer-events: none;
-    }
+    #game-container { position: relative; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
+    
+    /* video 元素隐藏，作为数据源 */
+    #webcam { display: none; }
+    
+    /* 镜像翻转画面，符合镜面交互习惯 */
     #output_canvas {
-      position: absolute; top: 0; left: 0;
-      width: 100%; height: 100%; object-fit: cover;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
     }
-
+    
     .hud-panel {
       position: absolute; top: 16px; z-index: 20;
-      background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.15);
-      backdrop-filter: blur(8px); border-radius: 12px; color: #fff;
-      padding: 8px 16px; display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+      background: rgba(15, 23, 42, 0.82); border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px); border-radius: 14px; color: #fff;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); padding: 10px 18px;
     }
     #score-hud { left: 16px; }
-    .score-main { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
-    #score-val { color: #22c55e; font-size: 24px; font-weight: 800; }
-    .highscore-sub { font-size: 12px; color: #fbbf24; }
+    .score-main { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    #score-val { color: #22c55e; font-size: 26px; font-weight: 800; }
+    .highscore-sub { font-size: 12px; color: #fbbf24; margin-top: 3px; }
     
-    #status-hud {
-      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-      z-index: 20; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 20px; padding: 6px 18px; color: #38bdf8; font-size: 13px; font-weight: 600;
-      pointer-events: none; white-space: nowrap; transition: color 0.2s;
-    }
-
-    .ctrl-group {
-      position: absolute; bottom: 16px; left: 16px; z-index: 25;
-      display: flex; gap: 8px;
-    }
+    #color-hud { right: 16px; display: flex; align-items: center; gap: 8px; }
+    .color-dot { width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+    .color-text { font-size: 14px; font-weight: 600; }
+    
+    .ctrl-group { position: absolute; bottom: 16px; left: 16px; z-index: 20; display: flex; gap: 8px; }
     .ctrl-btn {
-      background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.25);
-      color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px;
-      font-weight: 600; cursor: pointer;
+      background: rgba(15, 23, 42, 0.82); border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px;
+      cursor: pointer; transition: all 0.2s;
     }
-
-    #start-overlay {
+    
+    #status-overlay {
       position: absolute; inset: 0; background: rgba(15, 23, 42, 0.92);
-      z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center;
-      padding: 24px; text-align: center; gap: 16px; color: #fff;
+      z-index: 30; display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 24px; text-align: center; gap: 14px; color: #fff;
     }
-    .start-btn {
-      background: #22c55e; color: #fff; border: none; font-size: 18px; font-weight: 700;
-      padding: 14px 36px; border-radius: 14px; cursor: pointer;
-      box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
-      -webkit-tap-highlight-color: transparent;
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite;
     }
-    .start-btn:active { transform: scale(0.97); }
-
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
     #gameover-screen {
-      position: absolute; inset: 0; background: rgba(0, 0, 0, 0.85);
-      z-index: 60; display: none; flex-direction: column; justify-content: center; align-items: center;
+      position: absolute; inset: 0; background: rgba(0, 0, 0, 0.88);
+      z-index: 50; display: none; flex-direction: column; justify-content: center; align-items: center;
     }
     .go-card {
       background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(239, 68, 68, 0.4);
-      border-radius: 20px; padding: 32px 40px; display: flex; flex-direction: column;
-      align-items: center; gap: 14px; color: #fff;
+      border-radius: 20px; padding: 30px 40px; text-align: center; display: flex; flex-direction: column; gap: 14px;
+    }
+    .restart-btn {
+      background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; font-size: 16px;
+      font-weight: 700; border: none; padding: 12px 28px; border-radius: 12px; cursor: pointer;
     }
   </style>
 </head>
@@ -89,83 +86,112 @@
       <div class="highscore-sub">★ 历史最高: <span id="highscore-val">0</span></div>
     </div>
 
-    <div id="status-hud">待启动</div>
-
-    <div class="ctrl-group">
-      <button class="ctrl-btn" id="btn-restart">🔄 重置</button>
-      <button id="toggle-mode-btn" class="ctrl-btn">切换: 鼠标/触屏</button>
+    <div id="color-hud" class="hud-panel">
+      <div id="color-dot" class="color-dot" style="background:#22c55e; color:#22c55e;"></div>
+      <div id="color-text" class="color-text" style="color:#22c55e;">翠绿</div>
     </div>
 
-    <div id="start-overlay">
-      <h2 style="font-size: 26px;">🐍 AI 手势贪吃蛇</h2>
-      <p id="tip-text" style="color: #94a3b8; font-size: 14px; max-width: 320px; line-height: 1.6;">
-        游戏支持<b>前置摄像头手势</b>与<b>屏幕触屏/鼠标滑动</b>。<br>点击下方绿色按钮即可开始！
-      </p>
-      <button id="real-start-btn" class="start-btn">📸 启动摄像头开始游戏</button>
-      <button id="touch-mode-btn" class="ctrl-btn" style="margin-top: 10px; opacity: 0.9;">直接触屏/鼠标游玩</button>
+    <div class="ctrl-group">
+      <button id="toggle-mouse-btn" class="ctrl-btn">切换控制模式</button>
+      <button id="reset-btn" class="ctrl-btn">🔄 重来</button>
+    </div>
+
+    <div id="status-overlay">
+      <div class="spinner"></div>
+      <div id="status-text" style="font-size: 16px; line-height: 1.6;">
+        正在请求摄像头并加载手势模型...<br>
+        <span style="font-size:12px; color:#94a3b8;">⚠️ 必须通过 HTTPS 访问才能正常开启摄像头</span>
+      </div>
+      <button id="quick-mouse-btn" class="ctrl-btn" style="margin-top: 10px;">如果未授权，点此使用触控/鼠标玩</button>
     </div>
 
     <div id="gameover-screen">
       <div class="go-card">
         <h2 style="color: #ef4444; font-size: 28px;">游戏结束</h2>
-        <p style="color: #94a3b8; font-size: 14px;">蛇头碰到了自身！</p>
-        <div style="font-size: 16px; margin: 4px 0;">
-          得分: <b id="final-score" style="color: #4ade80;">0</b> | 
-          最高: <b id="final-highscore" style="color: #fbbf24;">0</b>
+        <p style="color: #94a3b8; font-size: 14px;">蛇头碰到了自己的身体！</p>
+        <div style="font-size: 18px; color: #fff;">
+          本次得分: <b id="final-score" style="color: #4ade80;">0</b> | 
+          历史最高: <b id="final-highscore" style="color: #fbbf24;">0</b>
         </div>
-        <button class="start-btn" id="btn-re-play">再玩一次</button>
+        <button id="restart-game-btn" class="restart-btn">🎮 开启下一次游戏</button>
       </div>
     </div>
   </div>
 
   <script>
-    const canvas = document.getElementById('output_canvas');
-    const ctx = canvas.getContext('2d');
-    const video = document.getElementById('webcam');
-    const startOverlay = document.getElementById('start-overlay');
-    const startBtn = document.getElementById('real-start-btn');
-    const tipText = document.getElementById('tip-text');
-    const statusHud = document.getElementById('status-hud');
-    const toggleBtn = document.getElementById('toggle-mode-btn');
+    const RAINBOW = [
+      { name: '赤红', hex: '#ef4444', r: 239, g: 68, b: 68 },
+      { name: '耀橙', hex: '#f97316', r: 249, g: 115, b: 22 },
+      { name: '明黄', hex: '#eab308', r: 234, g: 179, b: 8 },
+      { name: '翠绿', hex: '#22c55e', r: 34, g: 197, b: 94 },
+      { name: '青碧', hex: '#06b6d4', r: 6, g: 182, b: 212 },
+      { name: '湛蓝', hex: '#3b82f6', r: 59, g: 130, b: 246 },
+      { name: '幻紫', hex: '#a855f7', r: 168, g: 85, b: 247 }
+    ];
+
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const scoreVal = document.getElementById('score-val');
+    const highscoreVal = document.getElementById('highscore-val');
+    const colorDot = document.getElementById('color-dot');
+    const colorText = document.getElementById('color-text');
+    const statusOverlay = document.getElementById('status-overlay');
+    const statusText = document.getElementById('status-text');
+    const gameoverScreen = document.getElementById('gameover-screen');
+    const finalScore = document.getElementById('final-score');
+    const finalHighscore = document.getElementById('final-highscore');
 
     let score = 0;
     let highscore = parseInt(localStorage.getItem('gesture_snake_highscore') || '0', 10);
-    document.getElementById('highscore-val').innerText = highscore;
+    highscoreVal.innerText = highscore;
 
     let isGameOver = false;
-    let isTouchMode = false;
-    let targetPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    let handPoints = null;
+    let useMouseMode = false;
+    let pointerPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    let currentLength = 25;
+    let snakeSegments = [];
+    let invulnerableFrames = 80; // 保护帧，防止刚开局瞬间自撞
+    let currentColor = { ...RAINBOW[3] };
+    let targetColor = { ...RAINBOW[3] };
+    let apple = { x: 0, y: 0, radius: 18, pulse: 0 };
+    let particles = [];
 
-    const SEG_DIST = 14;
-    let snake = [];
-    let length = 25;
-    let apple = { x: 0, y: 0, r: 16, pulse: 0 };
-    let safeFrames = 60;
-
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      if (!apple.x && !apple.y) spawnApple();
+    function resizeCanvas() {
+      canvasElement.width = window.innerWidth;
+      canvasElement.height = window.innerHeight;
+      if (!apple.x) spawnApple();
     }
-    window.addEventListener('resize', resize);
-    resize();
-
-    function initSnake() {
-      snake = [];
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
-      targetPos = { x: cx, y: cy };
-      for (let i = 0; i < length; i++) {
-        snake.push({ x: cx, y: cy + i * 2 });
-      }
-    }
-    initSnake();
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
     function spawnApple() {
-      const pad = 60;
-      apple.x = pad + Math.random() * (canvas.width - pad * 2);
-      apple.y = pad + Math.random() * (canvas.height - pad * 2);
+      const margin = 80;
+      apple.x = margin + Math.random() * (canvasElement.width - margin * 2);
+      apple.y = margin + Math.random() * (canvasElement.height - margin * 2);
+    }
+
+    function createParticles(x, y, color) {
+      for (let i = 0; i < 18; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const spd = 2 + Math.random() * 6;
+        particles.push({
+          x, y, vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
+          radius: 3 + Math.random() * 3, alpha: 1, color
+        });
+      }
+    }
+
+    function restartGame() {
+      score = 0;
+      scoreVal.innerText = score;
+      currentLength = 25;
+      snakeSegments = [];
+      particles = [];
+      isGameOver = false;
+      invulnerableFrames = 80;
+      gameoverScreen.style.display = 'none';
+      spawnApple();
     }
 
     function triggerGameOver() {
@@ -174,277 +200,199 @@
       if (score > highscore) {
         highscore = score;
         localStorage.setItem('gesture_snake_highscore', highscore);
-        document.getElementById('highscore-val').innerText = highscore;
+        highscoreVal.innerText = highscore;
       }
-      document.getElementById('final-score').innerText = score;
-      document.getElementById('final-highscore').innerText = highscore;
-      document.getElementById('gameover-screen').style.display = 'flex';
+      finalScore.innerText = score;
+      finalHighscore.innerText = highscore;
+      gameoverScreen.style.display = 'flex';
     }
 
-    function restartGame() {
-      score = 0;
-      document.getElementById('score-val').innerText = 0;
-      length = 25;
-      isGameOver = false;
-      safeFrames = 60;
-      document.getElementById('gameover-screen').style.display = 'none';
-      initSnake();
-      spawnApple();
-    }
-    document.getElementById('btn-restart').onclick = restartGame;
-    document.getElementById('btn-re-play').onclick = restartGame;
+    function updateSnake(tx, ty) {
+      if (isGameOver) return;
+      if (snakeSegments.length === 0) {
+        for (let i = 0; i < currentLength; i++) snakeSegments.push({ x: tx, y: ty });
+        return;
+      }
+      const head = snakeSegments[0];
+      head.x += (tx - head.x) * 0.45;
+      head.y += (ty - head.y) * 0.45;
 
-    function updateTouch(clientX, clientY) {
-      targetPos.x = clientX;
-      targetPos.y = clientY;
-    }
-    window.addEventListener('mousemove', (e) => {
-      if (isTouchMode || !video.srcObject) updateTouch(e.clientX, e.clientY);
-    });
-    window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0) updateTouch(e.touches[0].clientX, e.touches[0].clientY);
-    }, { passive: true });
-    window.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 0) updateTouch(e.touches[0].clientX, e.touches[0].clientY);
-    }, { passive: true });
-
-    document.getElementById('touch-mode-btn').onclick = function() {
-      isTouchMode = true;
-      startOverlay.style.display = 'none';
-      statusHud.innerText = '👆 触屏/鼠标模式已开启';
-      statusHud.style.color = '#4ade80';
-      toggleBtn.innerText = '模式: 触屏操控';
-    };
-
-    toggleBtn.onclick = function() {
-      isTouchMode = !isTouchMode;
-      toggleBtn.innerText = isTouchMode ? '模式: 触屏操控' : '模式: 手势控制';
-      statusHud.innerText = isTouchMode ? '👆 触屏/鼠标模式' : '🔍 寻找手掌中...';
-    };
-
-    function updatePhysics() {
-      if (isGameOver || snake.length === 0) return;
-
-      snake[0].x += (targetPos.x - snake[0].x) * 0.35;
-      snake[0].y += (targetPos.y - snake[0].y) * 0.35;
-
-      for (let i = 1; i < snake.length; i++) {
-        const p = snake[i - 1], c = snake[i];
-        const dx = p.x - c.x, dy = p.y - c.y;
+      for (let i = 1; i < snakeSegments.length; i++) {
+        const prev = snakeSegments[i - 1];
+        const curr = snakeSegments[i];
+        const dx = prev.x - curr.x;
+        const dy = prev.y - curr.y;
         const dist = Math.hypot(dx, dy);
         if (dist > 0.001) {
-          c.x += dx * ((dist - SEG_DIST) / dist);
-          c.y += dy * ((dist - SEG_DIST) / dist);
+          curr.x += dx * ((dist - 12) / dist);
+          curr.y += dy * ((dist - 12) / dist);
         }
       }
-
-      while (snake.length < length) {
-        const tail = snake[snake.length - 1];
-        snake.push({ x: tail.x, y: tail.y });
+      while (snakeSegments.length < currentLength) {
+        const tail = snakeSegments[snakeSegments.length - 1];
+        snakeSegments.push({ x: tail.x, y: tail.y });
       }
 
-      if (safeFrames > 0) {
-        safeFrames--;
-      } else if (snake.length > 25) {
-        for (let i = 16; i < snake.length; i++) {
-          if (Math.hypot(snake[0].x - snake[i].x, snake[0].y - snake[i].y) < 14) {
+      // 仅在成长到足够长度且脱离保护期时检测碰撞
+      if (invulnerableFrames > 0) {
+        invulnerableFrames--;
+      } else if (snakeSegments.length > 28) {
+        for (let i = 16; i < snakeSegments.length; i++) {
+          if (Math.hypot(head.x - snakeSegments[i].x, head.y - snakeSegments[i].y) < 14) {
             triggerGameOver();
             return;
           }
         }
       }
-
-      if (Math.hypot(snake[0].x - apple.x, snake[0].y - apple.y) < apple.r + 20) {
-        score++;
-        document.getElementById('score-val').innerText = score;
-        length += 4;
-        spawnApple();
-      }
     }
 
-    function render() {
-      const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
+    function render(img = null, finger = null) {
+      const cw = canvasElement.width;
+      const ch = canvasElement.height;
+      canvasCtx.clearRect(0, 0, cw, ch);
 
-      if (video.readyState >= 2 && !isTouchMode) {
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -w, 0, w, h);
-        ctx.restore();
+      if (img && !useMouseMode) {
+        canvasCtx.drawImage(img, 0, 0, cw, ch);
       } else {
-        ctx.fillStyle = '#090d16';
-        ctx.fillRect(0, 0, w, h);
+        canvasCtx.fillStyle = '#090d16';
+        canvasCtx.fillRect(0, 0, cw, ch);
       }
 
-      updatePhysics();
+      currentColor.r += (targetColor.r - currentColor.r) * 0.08;
+      currentColor.g += (targetColor.g - currentColor.g) * 0.08;
+      currentColor.b += (targetColor.b - currentColor.b) * 0.08;
 
-      // 绘制捕获到的手部关节点
-      if (handPoints && !isTouchMode) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.85)';
-        for (let i = 0; i < handPoints.length; i++) {
-          const pt = handPoints[i];
-          ctx.beginPath();
-          ctx.arc((1 - pt.x) * w, pt.y * h, 5, 0, Math.PI * 2);
-          ctx.fill();
+      const target = useMouseMode ? pointerPos : finger;
+      if (target && !isGameOver) {
+        updateSnake(target.x, target.y);
+        if (Math.hypot(target.x - apple.x, target.y - apple.y) < apple.radius + 22) {
+          score++;
+          scoreVal.innerText = score;
+          currentLength += 5;
+          const next = RAINBOW[Math.floor(Math.random() * RAINBOW.length)];
+          targetColor = { ...next };
+          colorDot.style.background = next.hex;
+          colorDot.style.color = next.hex;
+          colorText.innerText = next.name;
+          colorText.style.color = next.hex;
+          createParticles(apple.x, apple.y, next.hex);
+          spawnApple();
         }
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(targetPos.x, targetPos.y, 22, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
       }
 
-      // 苹果
       if (!isGameOver) {
         apple.pulse += 0.08;
-        const pr = apple.r + Math.sin(apple.pulse) * 3;
-        ctx.save();
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = '#ef4444';
-        ctx.fillStyle = '#ef4444';
-        ctx.beginPath();
-        ctx.arc(apple.x, apple.y, pr, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        const r = apple.radius + Math.sin(apple.pulse) * 3;
+        canvasCtx.fillStyle = '#ef4444';
+        canvasCtx.beginPath();
+        canvasCtx.arc(apple.x, apple.y, r, 0, Math.PI * 2);
+        canvasCtx.fill();
       }
 
-      // 贪吃蛇
-      if (snake.length > 1) {
-        for (let i = snake.length - 1; i >= 0; i--) {
-          const s = snake[i];
-          const t = i / snake.length;
-          const rad = 16 * (1 - t * 0.45);
-          ctx.save();
-          ctx.fillStyle = `rgb(${Math.round(34 + t * 40)}, ${Math.round(197 - t * 50)}, ${Math.round(94 + t * 40)})`;
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.alpha -= 0.04;
+        if (p.alpha <= 0) { particles.splice(i, 1); continue; }
+        canvasCtx.globalAlpha = p.alpha;
+        canvasCtx.fillStyle = p.color;
+        canvasCtx.beginPath();
+        canvasCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        canvasCtx.fill();
+        canvasCtx.globalAlpha = 1;
+      }
+
+      if (snakeSegments.length > 1) {
+        const cr = Math.round(currentColor.r);
+        const cg = Math.round(currentColor.g);
+        const cb = Math.round(currentColor.b);
+
+        for (let i = snakeSegments.length - 1; i >= 0; i--) {
+          const seg = snakeSegments[i];
+          const radius = 17 * (1 - (i / snakeSegments.length) * 0.5);
+          canvasCtx.fillStyle = `rgb(${cr}, ${cg}, ${cb})`;
+          canvasCtx.beginPath();
+          canvasCtx.arc(seg.x, seg.y, radius, 0, Math.PI * 2);
+          canvasCtx.fill();
         }
-
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.arc(snake[0].x - 5, snake[0].y - 5, 4, 0, Math.PI * 2);
-        ctx.arc(snake[0].x + 5, snake[0].y - 5, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#000';
-        ctx.beginPath();
-        ctx.arc(snake[0].x - 5, snake[0].y - 5, 2, 0, Math.PI * 2);
-        ctx.arc(snake[0].x + 5, snake[0].y - 5, 2, 0, Math.PI * 2);
-        ctx.fill();
       }
-
-      requestAnimationFrame(render);
-    }
-    requestAnimationFrame(render);
-
-    function loadScript(url) {
-      return new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = url;
-        s.crossOrigin = 'anonymous';
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
-      });
     }
 
-    startBtn.onclick = async function() {
-      startBtn.innerText = '正在调起摄像头...';
-      tipText.innerHTML = '⚡ 请点击浏览器弹窗中的<b>“允许”</b>！';
+    // 适配触屏与鼠标（考虑 scaleX(-1) 镜像坐标）
+    function updatePointer(clientX, clientY) {
+      pointerPos.x = window.innerWidth - clientX;
+      pointerPos.y = clientY;
+    }
+    window.addEventListener('mousemove', (e) => updatePointer(e.clientX, e.clientY));
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false
-        });
-        video.srcObject = stream;
-        await video.play();
-
-        startOverlay.style.display = 'none';
-        statusHud.innerText = '⏳ 正在加载手势模型(若超时将自动转触控)...';
-
-        // 5秒超时保底机制：避免外网模型加载挂起无限卡住
-        const timeoutGuard = setTimeout(() => {
-          if (!window.handsReady) {
-            console.warn('AI模型加载超时，转为触控模式');
-            isTouchMode = true;
-            statusHud.innerText = '⚠️ 手势网络受限，已自动切换为触控/鼠标模式';
-            statusHud.style.color = '#fbbf24';
-            toggleBtn.innerText = '模式: 触屏操控';
-          }
-        }, 6000);
-
-        try {
-          // 换用国内同步最完整的 unpkg 镜像与 jsdelivr 镜像组合
-          await loadScript('https://lib.baomitu.com/mediapipe-camera-utils/0.4.1675466862/camera_utils.js').catch(() => 
-            loadScript('https://unpkg.com/@mediapipe/camera_utils@0.4.1675466862/camera_utils.js')
-          );
-          await loadScript('https://lib.baomitu.com/mediapipe-hands/0.4.1675469240/hands.js').catch(() => 
-            loadScript('https://unpkg.com/@mediapipe/hands@0.4.1675469240/hands.js')
-          );
-
-          const hands = new Hands({
-            locateFile: (file) => `https://unpkg.com/@mediapipe/hands@0.4.1675469240/${file}`
-          });
-
-          hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 0, // 移动端/低算力更敏感
-            minDetectionConfidence: 0.2, // 极限降低置信度阈值，哪怕微弱手影也能直接捕捉
-            minTrackingConfidence: 0.2
-          });
-
-          hands.onResults((results) => {
-            window.handsReady = true;
-            clearTimeout(timeoutGuard);
-
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-              const lm = results.multiHandLandmarks[0];
-              handPoints = lm;
-
-              // 优先食指(8)，备选中指(12)，再备选掌心(9)
-              const finger = lm[8] || lm[12] || lm[9];
-              targetPos.x = (1 - finger.x) * canvas.width;
-              targetPos.y = finger.y * canvas.height;
-
-              statusHud.innerText = '🎯 识别成功！正在手势操控';
-              statusHud.style.color = '#4ade80';
-            } else {
-              handPoints = null;
-              statusHud.innerText = '🔍 寻找手掌中（请将手掌展开，距离镜头40-60cm）';
-              statusHud.style.color = '#f59e0b';
-            }
-          });
-
-          // 启动逐帧检测
-          const camera = new Camera(video, {
-            onFrame: async () => {
-              if (!isTouchMode && video.readyState >= 2) {
-                await hands.send({ image: video });
-              }
-            },
-            width: 640,
-            height: 480
-          });
-          camera.start();
-
-        } catch (e) {
-          console.warn('AI加载失败', e);
-          isTouchMode = true;
-          statusHud.innerText = '触控/鼠标模式已开启';
-          statusHud.style.color = '#4ade80';
-        }
-
-      } catch (err) {
-        alert('无法启动相机：' + err.message);
-        startOverlay.style.display = 'none';
-        isTouchMode = true;
-        statusHud.innerText = '触控/鼠标模式';
+    function enableMouseMode() {
+      useMouseMode = true;
+      statusOverlay.style.display = 'none';
+      function loop() {
+        if (useMouseMode) render();
+        requestAnimationFrame(loop);
       }
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById('quick-mouse-btn').onclick = enableMouseMode;
+    document.getElementById('toggle-mouse-btn').onclick = () => {
+      useMouseMode = !useMouseMode;
+      if (useMouseMode) enableMouseMode();
     };
+    document.getElementById('reset-btn').onclick = restartGame;
+    document.getElementById('restart-game-btn').onclick = restartGame;
+
+    // 检查协议安全
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      statusText.innerHTML = `
+        <b style="color:#ef4444;font-size:18px;">⚠️ 浏览器拦截了摄像头权限</b><br>
+        当前是通过 <b>http://</b> 访问的。<br>
+        现代浏览器规定：摄像头必须通过 <b>https://</b> 才能开启！<br>
+        <small style="color:#94a3b8;margin-top:6px;display:block;">请为服务器配置 SSL 证书开启 HTTPS</small>
+      `;
+    }
+
+    // 初始化 MediaPipe
+    try {
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      hands.onResults((res) => {
+        statusOverlay.style.display = 'none';
+        let tip = null;
+        if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+          const p = res.multiHandLandmarks[0][8]; // 食指
+          tip = { x: p.x * canvasElement.width, y: p.y * canvasElement.height };
+        }
+        render(res.image, tip);
+      });
+
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          if (!useMouseMode) await hands.send({ image: videoElement });
+        },
+        facingMode: 'user', // 指定前置摄像头
+        width: 1280,
+        height: 720
+      });
+
+      camera.start().catch((err) => {
+        console.warn(err);
+        enableMouseMode();
+      });
+    } catch (e) {
+      console.warn(e);
+      enableMouseMode();
+    }
   </script>
 </body>
 </html>
